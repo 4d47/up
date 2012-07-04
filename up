@@ -1,0 +1,402 @@
+#!/usr/bin/perl
+
+require 5.008;
+
+use warnings;
+use strict;
+
+package main;
+
+our $VERSION = '0.3.2';
+our $NO_X;
+
+use Getopt::ArgvFile home => 1;
+use Getopt::Long;
+use Pod::Usage;
+use Term::ReadKey;
+use URI::Escape;
+use Perl6::Slurp;
+use IO::Interactive qw( is_interactive );
+use String::MkPasswd qw( mkpasswd );
+
+BEGIN {
+    # patching "use Clipboard;" to cover the no X case
+    require Clipboard;
+    $NO_X = (Clipboard->find_driver($^O) eq 'Xclip' and (not defined $ENV{DISPLAY}));
+    Clipboard->import() if not $NO_X;
+}
+
+END {
+    ReadMode 'restore';
+}
+
+# newline on Ctrl-c
+$SIG{INT} = sub { print "\n"; exit; };
+
+main() unless(caller);
+
+
+sub explode_uri {
+    # The convention we use to store passwords is not undertood by all URI
+    # schemes (ex: mysql) and in these cases it only provides it's generic
+    # methods; meaning we can't use userinfo. This sub parse the
+    # authority field returning ($user, $pass, $url, $host).
+    my ( $uri ) = @_;
+    $uri =~ m|^(.*://)(?:(.*?)(?:\:(.*))?\@)?(.*)$|x;
+    return ( uri_unescape($2), uri_unescape($3), $1 . $4, $4 );
+}
+
+sub implode_uri {
+    my ($user, $pass, $url ) = @_;
+    $user = uri_escape($user);
+    $pass = uri_escape($pass);
+    $url =~ s|://|://$user:$pass\@|;
+    return $url;
+}
+
+sub prompt {
+    # It's unfortunate that IO::Prompt is not working on Windows
+    # is there a better way to implement noecho that dont
+    # depends on Term::ReadKey ?
+    my ( $prompt, $noecho ) = @_;
+    ReadMode 'noecho' if $noecho;
+    print STDERR $prompt;
+    my $answer = <STDIN>;
+    chomp $answer;
+    print STDERR "\n" if $noecho;
+    ReadMode 'restore' if $noecho;
+    return $answer;
+}
+
+sub choose_password {
+    my ( $upfile, @uri_list ) = @_;
+    my ( $i );
+    return if not @uri_list;
+
+    for ( $i = 0 ; $i < @uri_list ; $i++ ) {
+        my ( $user, $pass, $url ) = explode_uri($uri_list[$i]);
+        $user = uri_escape($user);
+        $url =~ s|://|://$user\@|;
+        printf "%2i. %s\n", $i, $url;
+    }
+
+    if ( @uri_list == 1 ) {
+        $i = 0;
+    }
+    else {
+        $i = prompt ': ' while $i !~ m/^\d+$/ or not exists $uri_list[$i];
+    }
+    return $uri_list[$i];
+}
+
+
+sub main {
+    my $opts = {
+        file => "$ENV{HOME}/.up.aes",
+        cipher => 'Rijndael',
+        command => {
+            ftp => 'ftp {uri}',
+            ssh => 'ssh {user}@{host}',
+            http => 'firefox {url}',
+            https => 'firefox {url}'
+        }
+    };
+
+    GetOptions( $opts,
+        'help', 'man', 'version', 'file=s', 'pass=s', 'cipher=s',
+        'passwd', 'add=s@', 'update', 'delete', 'command=s%', 'go'
+    ) or exit;
+
+    pod2usage( -verbose => 1 ) if defined $opts->{help};
+    pod2usage( -exitstatus => 0, -verbose => 2 ) if defined $opts->{man};
+    exit not print "$VERSION\n" if defined $opts->{version};
+
+    warn "up: selected password will be displayed on screen.\n"
+        if $NO_X and is_interactive();
+
+    # normalizing options
+    $opts->{pass} = slurp $opts->{pass}, { chomp => 1 }
+      if defined $opts->{pass};
+    $opts->{pass} = prompt "$opts->{file}'s password: ", -noecho
+      if not defined $opts->{pass};
+
+    $opts->{add} = []
+      if not defined $opts->{add};
+    push @{ $opts->{add} }, <STDIN>
+      if -f STDIN;
+
+
+    # let's go ...
+
+    my $upfile = UP::File->new( $opts->{file}, $opts->{pass}, $opts->{cipher} )
+      or die "bad decrypt\n";
+
+    if ( defined $opts->{passwd} ) {
+
+        # update upfile password
+        my ( $new1, $new2 );
+        do {
+            $new1 = prompt 'enter new password: ', -noecho;
+            $new2 = prompt 'enter confirmation: ', -noecho;
+        } while ( $new1 ne $new2 );
+        $upfile->save($new1);
+        exit;
+    }
+
+    if ( scalar @{ $opts->{add} } > 0 ) {
+
+        # add a bunch of urls
+        foreach my $uri ( @{ $opts->{add} } ) {
+            my ( $user, $pass, $url ) = explode_uri($uri);
+            $user = prompt 'enter username: ' if not defined $user;
+            $pass = prompt 'enter password: ', -noechno if not defined $pass;
+            $pass = mkpasswd $pass if $pass eq '?';
+            $upfile->add( implode_uri( $user, $pass, $url ) );
+        }
+        $upfile->save();
+        exit;
+    }
+
+    my $search_string =
+      defined $ARGV[0] ? $ARGV[0] : prompt 'enter search string: ';
+    my @search_results = $upfile->search($search_string);
+    undef $ARGV[0];
+
+    if ( not @search_results ) {
+        warn "no results\n";
+        exit;
+    }
+
+    if ( not is_interactive() ) {
+        print join( "\n", @search_results );
+        exit;
+    }
+
+    my $uri = choose_password( $upfile, @search_results );
+    my ( $user, $pass, $url, $host ) = explode_uri($uri);
+
+    if ( defined $opts->{delete} ) {
+        $upfile->delete($uri);
+        $upfile->save();
+        exit;
+    }
+
+    if ( defined $opts->{update} ) {
+
+        # update selected uri
+        $url  = prompt("enter url [$url]: ")       || $url;
+        $user = prompt("enter username [$user]: ") || $user;
+        $pass = prompt( "enter password [*****]: ", -noechno ) || $pass;
+        $pass = mkpasswd $pass if $pass eq '?';
+        $upfile->update( $uri, implode_uri( $user, $pass, $url ) );
+        $upfile->save();
+    }
+
+    if ( defined $pass ) {
+        if ( $NO_X ) {
+            print $pass, "\n";
+        }
+        else {
+            Clipboard->copy($pass);
+        }
+    }
+
+    if ( defined $opts->{go} ) {
+        use URI;
+        use Template;
+
+        my $scheme = substr( $url, 0, index( $url, ':' ) );
+        if ( not defined $opts->{command}->{$scheme} ) {
+            die "don't know how to exec this, use --command.\n";
+        }
+        else {
+            my $cmd;
+            my $tt = Template->new( START_TAG => '{', END_TAG => '}' );
+            $tt->process(
+                \$opts->{command}->{$scheme},
+                {
+                    user => $user,
+                    pass => $pass,
+                    host => $host,
+                    url  => $url,
+                    uri  => URI->new($uri)
+                },
+                \$cmd
+            );
+            print "exec $cmd\n";
+            exec $cmd or die;
+        }
+    }
+}
+
+
+package UP::File;
+
+use URI::Escape;
+use Crypt::CBC;
+use Perl6::Slurp;
+
+sub new {
+    my ( $class, $file, $pass, $algo ) = @_;
+
+    my $cipher = Crypt::CBC->new( -key => $pass, -cipher => $algo);
+    my @lines;
+    if ( -r $file ) {
+        my $text = slurp $file;
+        $text = $cipher->decrypt($text);
+        return if $text !~ m/^[[:ascii:]]+$/; # must be a better way
+        @lines = grep { !/^\s*$/ } split /\n/, $text;
+    }
+    return bless {
+        file => $file,
+        lines => \@lines,
+        cipher => $cipher,
+    }, $class;
+}
+
+sub search {
+    my ($self, $q) = @_;
+    $q = uri_escape($q);
+    return grep { m/\Q$q/ix } @{ $self->{lines} };
+}
+
+sub save {
+    my ($self, $pass) = @_;
+    $self->{cipher}->passphrase($pass) if defined $pass;
+    open my $fh, '>', $self->{file} or die "Unable to save up file: $!\n";
+    print $fh $self->{cipher}->encrypt( join "\n", @{ $self->{lines} } );
+    close $fh;
+    return;
+}
+
+sub add {
+    my ( $self, $uri ) = @_;
+    return push @{ $self->{lines} }, $uri;
+}
+
+sub update {
+    my ( $self, $old_uri, $new_uri ) = @_;
+    for ( my $i = 0 ; $i < @{ $self->{lines} } ; $i++ ) {
+        if ( $self->{lines}->[$i] eq $old_uri ) {
+            $self->{lines}->[$i] = $new_uri;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+sub delete {
+    my ( $self, $uri ) = @_;
+    for ( my $i = 0 ; $i < @{ $self->{lines} } ; $i++ ) {
+        if ( $self->{lines}->[$i] eq $uri ) {
+            splice @{ $self->{lines} }, $i, 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+__END__
+
+=head1 NAME
+
+up - url/password manager to mat's password database.
+
+=head1 SYNOPSIS
+
+up [options] [search_string]
+
+
+=head1 DESCRIPTION
+
+up is a password database utility, it stores your passwords in URLs to an
+encrypted file (one per line). Allowing you to remember only one password
+(the "upfile" combination).
+
+The options are:
+
+ --file=file  or  -f file
+    absolute path to passwords encrypted file,
+    default to ~/.up.aes
+
+ --pass=file
+    read password from file, for not prompting
+
+ --cipher=name
+    The cipher block chaining mode algorithm
+    (defaults to rijndael).
+
+ --add=url  or  -a url
+    add url to the upfile;
+    if password equals "?" it will be auto-generated.
+
+ --update  or  -u
+    update an entry;
+    if password equals "?" it will be auto-generated.
+
+ --delete  or  -d
+    delete an entry
+
+ --passwd
+    change upfile combination
+
+ --go  or  -g
+    exec(2) with command specified for scheme
+
+ --command scheme=bin  or  -c scheme=bin
+    specify which binary to exec for scheme in a Template(3p) style string.
+    available variables are:
+      {user} # username
+      {pass} # password
+      {url}  # full URL without user and pass embeded
+      {host} # {url} without scheme
+      {uri}  # URI(3p) object without password ( ex: one may say {uri.port} )
+
+    Example:
+      --command ssh="/usr/bin/ssh {user}@{host}"
+
+ -h  or  --help
+ -m  or  --man
+ -v  or  --version
+
+
+=head1 WARNING
+
+The search is performed on fulltext, passwords are searched too !
+
+
+=head1 BUGS/TODO
+
+- This is insecure. ex: passwords may leak in swap partition (not mlock(2))
+
+- Needs more testing. Looser versions dependencies specs.
+
+- It should be possible to specify more than one command for a scheme,
+  in which case we should prompt the user.
+
+- Allow user to select more than one entry. (ex: up -u oldpassword)
+
+- update() and delete() operations are dumbly implemented.
+
+- Restructure code (notably to ease gui view).
+
+
+=head1 EXTRA
+
+$ up '' | wc -l                                      # passwords count
+
+$ up '' | sed 's/:.*$//' | sort | uniq -c | sort -r  # count per scheme
+
+$ openssl enc -d -aes-256-cbc -in ~/.up.aes          # decrypt with openssl
+
+=head1 AUTHOR
+
+Mathieu Gagnon <mathieu@gagnon.name>
+
+=head1 LICENSE
+
+This package is distributed under the same terms as Perl itself,
+see the Artistic License on Perl's home page.
+
+=cut
