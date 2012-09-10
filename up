@@ -18,6 +18,7 @@ use URI::Escape;
 use Perl6::Slurp;
 use IO::Interactive qw( is_interactive );
 use String::MkPasswd qw( mkpasswd );
+use File::HomeDir;
 
 BEGIN {
     # patching "use Clipboard;" to cover the no X case
@@ -92,7 +93,7 @@ sub choose_password {
 
 sub main {
     my $opts = {
-        file => "$ENV{HOME}/.up.aes",
+        file => File::HomeDir->my_home . "/.up.aes",
         cipher => 'Rijndael',
         command => {
             ftp => 'ftp {uri}',
