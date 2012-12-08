@@ -8,7 +8,7 @@ use strict;
 package main;
 
 our $VERSION = '0.3.2';
-our $NO_X;
+our $IN_TTY;
 
 use Getopt::ArgvFile home => 1;
 use Getopt::Long;
@@ -23,8 +23,8 @@ use File::HomeDir;
 BEGIN {
     # patching "use Clipboard;" to cover the no X case
     require Clipboard;
-    $NO_X = (Clipboard->find_driver($^O) eq 'Xclip' and (not defined $ENV{DISPLAY}));
-    Clipboard->import() if not $NO_X;
+    $IN_TTY = (Clipboard->find_driver($^O) eq 'Xclip' and (not defined $ENV{DISPLAY}));
+    Clipboard->import() if not $IN_TTY;
 }
 
 END {
@@ -113,7 +113,7 @@ sub main {
     exit not print "$VERSION\n" if defined $opts->{version};
 
     warn "up: selected password will be displayed on screen.\n"
-        if $NO_X and is_interactive();
+        if $IN_TTY and is_interactive();
 
     # normalizing options
     $opts->{pass} = slurp $opts->{pass}, { chomp => 1 }
@@ -194,7 +194,7 @@ sub main {
     }
 
     if ( defined $pass ) {
-        if ( $NO_X ) {
+        if ( $IN_TTY ) {
             print $pass, "\n";
         }
         else {
