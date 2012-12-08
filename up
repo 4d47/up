@@ -25,6 +25,12 @@ BEGIN {
     require Clipboard;
     $IN_TTY = (Clipboard->find_driver($^O) eq 'Xclip' and (not defined $ENV{DISPLAY}));
     Clipboard->import() if not $IN_TTY;
+
+    # see: https://rt.cpan.org/Public/Bug/Display.html?id=65399
+    if ('Clipboard::Xclip' eq $Clipboard::driver) {
+        no warnings 'redefine';
+        *Clipboard::Xclip::all_selections = sub { qw(clipboard primary buffer secondary) };
+    }
 }
 
 END {
