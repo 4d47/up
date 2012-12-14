@@ -16,6 +16,7 @@ WriteMakefile(
 		'IO::Interactive'    => '0.0.5',
 		'Template'           => '2.19',
 		'URI'                => '1.04',
+		'File::HomeDir'      => '1.00',
 
 		'URI::Escape'        => '3.28',
 		'String::MkPasswd'   => '0.02',
