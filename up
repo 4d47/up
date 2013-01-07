@@ -28,7 +28,7 @@ BEGIN {
 
     # see: https://rt.cpan.org/Public/Bug/Display.html?id=65399
     if ('Clipboard::Xclip' eq $Clipboard::driver) {
-        no warnings 'redefine';
+        no warnings 'redefine', 'once';
         *Clipboard::Xclip::all_selections = sub { qw(clipboard primary buffer secondary) };
     }
 }
