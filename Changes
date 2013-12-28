@@ -1,0 +1,11 @@
+
+0.3.4
+-----
+
+* Bump dependencies to latest.
+* Make generated password pass green on howsecureismypassword.net
+
+0.3.3
+-----
+
+* No memory of the past
