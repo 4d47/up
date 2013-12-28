@@ -19,7 +19,7 @@ WriteMakefile(
 		'File::HomeDir'      => '1.00',
 
 		'URI::Escape'        => '3.28',
-		'String::MkPasswd'   => '0.02',
+		'String::MkPasswd'   => '0.05',
 		'Crypt::CBC'         => '2.30',
 		'Crypt::DES'         => '0',
 		'Crypt::Rijndael'    => '1.06',
