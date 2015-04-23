@@ -7,7 +7,7 @@ use strict;
 
 package main;
 
-our $VERSION = '0.3.4';
+our $VERSION = '0.4.0';
 our $IN_TTY;
 
 use Getopt::ArgvFile home => 1;
@@ -115,7 +115,8 @@ sub main {
 
     GetOptions( $opts,
         'help', 'man', 'version', 'file=s', 'pass=s', 'cipher=s',
-        'passwd', 'add=s@', 'update', 'delete', 'command=s%', 'go'
+        '1|feeling-lucky', 'passwd', 'add=s@', 'update', 'delete',
+        'command=s%', 'go'
     ) or exit;
 
     pod2usage( -verbose => 1 ) if defined $opts->{help};
@@ -183,7 +184,7 @@ sub main {
         exit;
     }
 
-    my $uri = choose_password( $upfile, @search_results );
+    my $uri = $opts->{1} ? $search_results[0] : choose_password( $upfile, @search_results );
     my ( $user, $pass, $url, $host ) = explode_uri($uri);
 
     if ( defined $opts->{delete} ) {
@@ -333,6 +334,9 @@ The options are:
 
  --pass=file
     read password from file, for not prompting
+
+ --feeling-lucky or -1 (minus one)
+    choose the first search result
 
  --cipher=name
     The cipher block chaining mode algorithm
