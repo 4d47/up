@@ -7,7 +7,7 @@ use strict;
 
 package main;
 
-our $VERSION = '0.4.0';
+our $VERSION = '0.5.0';
 our $IN_TTY;
 
 use Getopt::ArgvFile home => 1;
@@ -105,6 +105,7 @@ sub main {
     my $opts = {
         file => File::HomeDir->my_home . "/.up.aes",
         cipher => 'Rijndael',
+        output => ($IN_TTY and is_interactive()),
         command => {
             ftp => 'ftp {uri}',
             ssh => 'ssh {user}@{host}',
@@ -116,7 +117,7 @@ sub main {
     GetOptions( $opts,
         'help', 'man', 'version', 'file=s', 'pass=s', 'cipher=s',
         '1|feeling-lucky', 'passwd', 'add=s@', 'update', 'delete',
-        'command=s%', 'go'
+        'output', 'command=s%', 'go'
     ) or exit;
 
     pod2usage( -verbose => 1 ) if defined $opts->{help};
@@ -124,7 +125,7 @@ sub main {
     exit not print "$VERSION\n" if defined $opts->{version};
 
     warn "up: selected password will be displayed on screen.\n"
-        if $IN_TTY and is_interactive();
+        if $opts->{output};
 
     # normalizing options
     $opts->{pass} = slurp $opts->{pass}, { chomp => 1 }
@@ -205,7 +206,7 @@ sub main {
     }
 
     if ( defined $pass ) {
-        if ( $IN_TTY ) {
+        if ( $opts->{output} ) {
             print $pass, "\n";
         }
         else {
@@ -355,6 +356,9 @@ The options are:
 
  --passwd
     change upfile combination
+
+ --output
+    print selected password instead of copying to clipboard.
 
  --go  or  -g
     exec(2) with command specified for scheme
