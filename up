@@ -100,7 +100,6 @@ sub mkpassword {
     return mkpasswd(-length => 12);
 }
 
-
 sub main {
     my $opts = {
         file => File::HomeDir->my_home . "/.up.aes",
@@ -112,6 +111,16 @@ sub main {
             http => 'firefox {url}',
             https => 'firefox {url}'
         }
+    };
+    my $copy = sub {
+        my ($data) = @_;
+        if ( $opts->{output} ) {
+            print $data, "\n";
+        }
+        else {
+            Clipboard->copy($data);
+        }
+        return $data;
     };
 
     GetOptions( $opts,
@@ -163,7 +172,7 @@ sub main {
             my ( $user, $pass, $url ) = explode_uri($uri);
             $user = prompt 'enter username: ' if not defined $user;
             $pass = prompt 'enter password: ', -noechno if not defined $pass;
-            $pass = mkpassword if $pass eq '?';
+            $pass = $copy->(mkpassword) if $pass eq '?';
             $upfile->add( implode_uri( $user, $pass, $url ) );
         }
         $upfile->save();
@@ -200,18 +209,13 @@ sub main {
         $url  = prompt("enter url [$url]: ")       || $url;
         $user = prompt("enter username [$user]: ") || $user;
         $pass = prompt( "enter password [*****]: ", -noechno ) || $pass;
-        $pass = mkpassword if $pass eq '?';
+        $pass = $copy->(mkpassword) if $pass eq '?';
         $upfile->update( $uri, implode_uri( $user, $pass, $url ) );
         $upfile->save();
     }
 
     if ( defined $pass ) {
-        if ( $opts->{output} ) {
-            print $pass, "\n";
-        }
-        else {
-            Clipboard->copy($pass);
-        }
+        $copy->($pass);
     }
 
     if ( defined $opts->{go} ) {
